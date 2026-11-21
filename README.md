@@ -2,6 +2,8 @@
 
 A chess engine in OCaml. CS 3110, Fall 2026.
 
+Amine Badreddine (ab3234), Yedidia Alebachew (ya287), Shehroze Kiani (szk7), Xavier Blake-Forbes (xb62), Jahan Kulkarni (jk2959). Areas of responsibility are in [AUTHORS.md](AUTHORS.md).
+
 ```
 dune build        # must stay clean on main
 dune test         # runs the suite
