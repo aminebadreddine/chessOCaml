@@ -1,0 +1,4 @@
+(executable
+ (public_name chessOCaml)
+ (name main)
+ (libraries chessOCaml))
