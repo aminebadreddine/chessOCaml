@@ -245,6 +245,9 @@ let test_ordinary_moves () =
     | exception Invalid_argument _ -> true
     | _ -> false)
 
+let has_move moves text =
+  List.exists (fun m -> Move.equal m (mv text)) moves
+
 (* ------------------------------------------------------------------ *)
 (* Foundation: games and history                                       *)
 (* ------------------------------------------------------------------ *)
@@ -298,6 +301,433 @@ let test_fen_printing () =
   check_string "a played position prints"
     ~expected:"rnbqkbnr/pp1ppppp/8/2p5/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 2"
     ~actual:(fen after)
+
+
+(* ------------------------------------------------------------------ *)
+(* Foundation: pseudo-legal move generation                           *)
+(* ------------------------------------------------------------------ *)
+
+let test_move_generation () =
+  section "move generation";
+
+  (* Starting position: each pawn has two moves, and each knight has
+     two moves. No other pieces can move. *)
+  let initial_moves = Movegen.pseudo_legal Position.initial in
+
+  check_int "the starting position has twenty moves"
+    ~expected:20 ~actual:(List.length initial_moves);
+
+  check "e2 can move one square"
+    (has_move initial_moves "e2e3");
+
+  check "e2 can move two squares"
+    (has_move initial_moves "e2e4");
+
+  check "g1 can move to f3"
+    (has_move initial_moves "g1f3");
+
+  check "g1 can move to h3"
+    (has_move initial_moves "g1h3");
+
+  check "the blocked rook cannot move"
+    (not (has_move initial_moves "a1a2"));
+
+  (* Empty and opponent pieces do not generate moves. *)
+  check "an empty square has no moves"
+    (Movegen.pseudo_legal_from Position.initial (sq "e4") = []);
+
+  let after_e4 = play Position.initial "e2e4" in
+
+  check "the previous player cannot generate moves"
+    (Movegen.pseudo_legal_from after_e4 (sq "e2") = []);
+
+  (* Knight movement. *)
+  let knight_board =
+    Board.set
+      (Board.set Board.empty (sq "e4")
+         (Some (Piece.make Color.White Piece.Knight)))
+      (sq "e1")
+      (Some (Piece.make Color.White Piece.King))
+  in
+
+  let knight_pos =
+    Position.make ~board:knight_board ~turn:Color.White
+      ~castling:Castling.none ~en_passant:None
+      ~halfmove_clock:0 ~fullmove_number:1
+  in
+
+  let knight_moves =
+    Movegen.pseudo_legal_from knight_pos (sq "e4")
+  in
+
+  check_int "a knight in the center has eight moves"
+    ~expected:8 ~actual:(List.length knight_moves);
+
+  check "the knight can move in an L shape"
+    (has_move knight_moves "e4f6");
+
+  check "the knight cannot move like a rook"
+    (not (has_move knight_moves "e4e5"));
+
+  (* King movement. *)
+  let king_board =
+    Board.set Board.empty (sq "e4")
+      (Some (Piece.make Color.White Piece.King))
+  in
+
+  let king_pos =
+    Position.make ~board:king_board ~turn:Color.White
+      ~castling:Castling.none ~en_passant:None
+      ~halfmove_clock:0 ~fullmove_number:1
+  in
+
+  let king_moves =
+    Movegen.pseudo_legal_from king_pos (sq "e4")
+  in
+
+  check_int "a king in the center has eight moves"
+    ~expected:8 ~actual:(List.length king_moves);
+
+  check "the king can move one square diagonally"
+    (has_move king_moves "e4f5");
+
+  check "the king cannot move two squares"
+    (not (has_move king_moves "e4e6"));
+
+  (* Pawn movement. *)
+  let pawn_board =
+    Board.set
+      (Board.set Board.empty (sq "e2")
+         (Some (Piece.make Color.White Piece.Pawn)))
+      (sq "e1")
+      (Some (Piece.make Color.White Piece.King))
+  in
+
+  let pawn_pos =
+    Position.make ~board:pawn_board ~turn:Color.White
+      ~castling:Castling.none ~en_passant:None
+      ~halfmove_clock:0 ~fullmove_number:1
+  in
+
+  let pawn_moves =
+    Movegen.pseudo_legal_from pawn_pos (sq "e2")
+  in
+
+  check "a pawn can move forward one square"
+    (has_move pawn_moves "e2e3");
+
+  check "a pawn can move forward two squares from its starting rank"
+    (has_move pawn_moves "e2e4");
+
+  check "a pawn cannot move sideways"
+    (not (has_move pawn_moves "e2f2"));
+
+  (* Pawn captures. *)
+let capture_board =
+  Board.set
+    (Board.set
+       (Board.set
+          (Board.set Board.empty (sq "e4")
+             (Some (Piece.make Color.White Piece.Pawn)))
+          (sq "d5")
+          (Some (Piece.make Color.Black Piece.Pawn)))
+       (sq "f5")
+       (Some (Piece.make Color.White Piece.Pawn)))
+    (sq "e5")
+    (Some (Piece.make Color.Black Piece.Pawn))
+in
+
+  let capture_pos =
+    Position.make ~board:capture_board ~turn:Color.White
+      ~castling:Castling.none ~en_passant:None
+      ~halfmove_clock:0 ~fullmove_number:1
+  in
+
+  let capture_moves =
+    Movegen.pseudo_legal_from capture_pos (sq "e4")
+  in
+
+  check "a pawn can capture diagonally"
+    (has_move capture_moves "e4d5");
+
+  check "a pawn cannot capture its own piece"
+    (not (has_move capture_moves "e4f5"));
+
+  check "a pawn cannot move forward into an occupied square"
+    (not (has_move capture_moves "e4e5"));
+
+  (* Rook movement and blockers. *)
+  let rook_board =
+    List.fold_left
+      (fun b (name, piece) ->
+        Board.set b (sq name) (Some piece))
+      Board.empty
+      [
+        ("d4", Piece.make Color.White Piece.Rook);
+        ("d6", Piece.make Color.White Piece.Pawn);
+        ("f4", Piece.make Color.Black Piece.Pawn);
+      ]
+  in
+
+  let rook_pos =
+    Position.make ~board:rook_board ~turn:Color.White
+      ~castling:Castling.none ~en_passant:None
+      ~halfmove_clock:0 ~fullmove_number:1
+  in
+
+  let rook_moves =
+    Movegen.pseudo_legal_from rook_pos (sq "d4")
+  in
+
+  check "a rook can move along a file"
+    (has_move rook_moves "d4d5");
+
+  check "a rook can move along a rank"
+    (has_move rook_moves "d4e4");
+
+  check "a rook can capture an enemy piece"
+    (has_move rook_moves "d4f4");
+
+  check "a rook cannot move through an enemy piece"
+    (not (has_move rook_moves "d4g4"));
+
+  check "a rook cannot capture its own piece"
+    (not (has_move rook_moves "d4d6"));
+
+  (* Bishop movement. *)
+  let bishop_board =
+    Board.set Board.empty (sq "d4")
+      (Some (Piece.make Color.White Piece.Bishop))
+  in
+
+  let bishop_pos =
+    Position.make ~board:bishop_board ~turn:Color.White
+      ~castling:Castling.none ~en_passant:None
+      ~halfmove_clock:0 ~fullmove_number:1
+  in
+
+  let bishop_moves =
+    Movegen.pseudo_legal_from bishop_pos (sq "d4")
+  in
+
+  check "a bishop can move diagonally"
+    (has_move bishop_moves "d4e5");
+
+  check "a bishop cannot move horizontally"
+    (not (has_move bishop_moves "d4e4"));
+
+  (* Queen movement. *)
+  let queen_board =
+    Board.set Board.empty (sq "d4")
+      (Some (Piece.make Color.White Piece.Queen))
+  in
+
+  let queen_pos =
+    Position.make ~board:queen_board ~turn:Color.White
+      ~castling:Castling.none ~en_passant:None
+      ~halfmove_clock:0 ~fullmove_number:1
+  in
+
+  let queen_moves =
+    Movegen.pseudo_legal_from queen_pos (sq "d4")
+  in
+
+  check "a queen can move like a rook"
+    (has_move queen_moves "d4d5");
+
+  check "a queen can move like a bishop"
+    (has_move queen_moves "d4e5");
+
+  (* Promotion. *)
+  let promotion_board =
+    Board.set Board.empty (sq "a7")
+      (Some (Piece.make Color.White Piece.Pawn))
+  in
+
+  let promotion_pos =
+    Position.make ~board:promotion_board ~turn:Color.White
+      ~castling:Castling.none ~en_passant:None
+      ~halfmove_clock:0 ~fullmove_number:1
+  in
+
+  let promotion_moves =
+    Movegen.pseudo_legal_from promotion_pos (sq "a7")
+  in
+
+  check_int "a pawn promotes to four possible pieces"
+    ~expected:4 ~actual:(List.length promotion_moves);
+
+  check "a pawn can promote to a queen"
+    (has_move promotion_moves "a7a8q");
+
+  check "a pawn can promote to a rook"
+    (has_move promotion_moves "a7a8r");
+
+  check "a pawn can promote to a bishop"
+    (has_move promotion_moves "a7a8b");
+
+  check "a pawn can promote to a knight"
+    (has_move promotion_moves "a7a8n")
+
+
+(* ------------------------------------------------------------------ *)
+(* Foundation: pseudo-legal attackers generation                      *)
+(* ------------------------------------------------------------------ *)
+
+
+let test_attacks () =
+  let position_with pieces =
+    let board =
+      List.fold_left
+        (fun board (square, color, kind) ->
+          Board.set board (sq square)
+            (Some (Piece.make color kind)))
+        Board.empty pieces
+    in
+    Position.make ~board ~turn:Color.White
+      ~castling:Castling.none ~en_passant:None
+      ~halfmove_clock:0 ~fullmove_number:1
+  in
+
+  (* Knight attacks *)
+  let knight_pos =
+    position_with
+      [("f6", Color.White, Piece.Knight)]
+  in
+
+  check "knight attacks in an L shape"
+    (Movegen.attacks knight_pos Color.White (sq "e4"));
+
+  check "knight does not attack a non-L-shaped square"
+    (not (Movegen.attacks knight_pos Color.White (sq "e5")));
+
+  check "knight attackers returns the knight square"
+    (List.mem (sq "f6")
+       (Movegen.attackers knight_pos Color.White (sq "e4")));
+
+  (* King attacks *)
+  let king_pos =
+    position_with
+      [("e5", Color.White, Piece.King)]
+  in
+
+  check "king attacks adjacent squares"
+    (Movegen.attacks king_pos Color.White (sq "e4"));
+
+  check "king does not attack two squares away"
+    (not (Movegen.attacks king_pos Color.White (sq "e3")));
+
+  (* Pawn attacks *)
+  let white_pawn_pos =
+    position_with
+      [("d5", Color.White, Piece.Pawn)]
+  in
+
+  check "white pawn attacks diagonally"
+    (Movegen.attacks white_pawn_pos Color.White (sq "e6"));
+
+  check "white pawn attacks empty diagonal square"
+    (Movegen.attacks white_pawn_pos Color.White (sq "c6"));
+
+  check "white pawn does not attack forward"
+    (not (Movegen.attacks white_pawn_pos Color.White (sq "d6")));
+
+  let black_pawn_pos =
+    position_with
+      [("d5", Color.Black, Piece.Pawn)]
+  in
+
+  check "black pawn attacks diagonally"
+    (Movegen.attacks black_pawn_pos Color.Black (sq "e4"));
+
+  check "black pawn does not attack forward"
+    (not (Movegen.attacks black_pawn_pos Color.Black (sq "d4")));
+
+  (* Rook attacks *)
+  let rook_pos =
+    position_with
+      [("e1", Color.White, Piece.Rook)]
+  in
+
+  check "rook attacks along a file"
+    (Movegen.attacks rook_pos Color.White (sq "e6"));
+
+  check "rook attacks along a rank"
+    (Movegen.attacks rook_pos Color.White (sq "h1"));
+
+  check "rook does not attack diagonally"
+    (not (Movegen.attacks rook_pos Color.White (sq "f2")));
+
+  check "rook attackers returns the rook square"
+    (List.mem (sq "e1")
+       (Movegen.attackers rook_pos Color.White (sq "e6")));
+
+  (* Rook blocking *)
+  let blocked_rook_pos =
+    position_with
+      [("e1", Color.White, Piece.Rook);
+       ("e3", Color.Black, Piece.Pawn)]
+  in
+
+  check "rook cannot attack beyond a blocking piece"
+    (not (Movegen.attacks blocked_rook_pos Color.White (sq "e5")));
+
+  check "rook attacks the first occupied square"
+    (Movegen.attacks blocked_rook_pos Color.White (sq "e3"));
+
+  (* Bishop attacks *)
+  let bishop_pos =
+    position_with
+      [("b1", Color.White, Piece.Bishop)]
+  in
+
+  check "bishop attacks diagonally"
+    (Movegen.attacks bishop_pos Color.White (sq "e4"));
+
+  check "bishop does not attack horizontally"
+    (not (Movegen.attacks bishop_pos Color.White (sq "b5")));
+
+  (* Bishop blocking *)
+  let blocked_bishop_pos =
+    position_with
+      [("b1", Color.White, Piece.Bishop);
+       ("c2", Color.Black, Piece.Pawn)]
+  in
+
+  check "bishop cannot attack beyond a blocking piece"
+    (not (Movegen.attacks blocked_bishop_pos Color.White (sq "d3")));
+
+  check "bishop attacks the first occupied square"
+    (Movegen.attacks blocked_bishop_pos Color.White (sq "c2"));
+
+  (* Queen attacks *)
+  let queen_pos =
+    position_with
+      [("e1", Color.White, Piece.Queen)]
+  in
+
+  check "queen attacks along a file"
+    (Movegen.attacks queen_pos Color.White (sq "e6"));
+
+  check "queen attacks diagonally"
+    (Movegen.attacks queen_pos Color.White (sq "h4"));
+
+  check "queen attackers returns the queen square"
+    (List.mem (sq "e1")
+       (Movegen.attackers queen_pos Color.White (sq "e6")));
+
+  (* Color filtering *)
+  check "attacks ignores pieces of the wrong color"
+    (not (Movegen.attacks rook_pos Color.Black (sq "e6")));
+
+  (* Empty attackers list *)
+  check "attackers returns an empty list when nothing attacks"
+    (Movegen.attackers knight_pos Color.Black (sq "e4") = [])
+
+
+
+
+
 
 (* ------------------------------------------------------------------ *)
 (* Staged: the special rules, not implemented yet                      *)
@@ -420,6 +850,8 @@ let () =
       ("ordinary moves", test_ordinary_moves);
       ("games", test_game);
       ("FEN printing", test_fen_printing);
+      ("move generation", test_move_generation);
+      ("attacks", test_attacks);
     ];
   print_endline "\n=== staged features (not implemented yet) ===";
   group := `Staged;
