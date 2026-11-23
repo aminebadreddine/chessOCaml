@@ -50,7 +50,7 @@ build. Move a test from staged to foundation as its feature lands.
 | Owner | Module | State |
 |---|---|---|
 | Yedidia | `Board`, `Position`, `Game`, `Fen` | done except five helpers in `position.ml` and `Fen.to_position` |
-| Xavier | `Movegen` | interface drafted, not implemented |
+| Xavier | `Movegen` | done except implementation for castling and en passant |
 | Shehroze | `Rules` | interface drafted, not implemented |
 | Amine | `Notation`, `Render`, `Persist` | interfaces drafted; `Render.ascii` works as a debug renderer |
 | Jah | `Bot`, tests | interface drafted, not implemented |
