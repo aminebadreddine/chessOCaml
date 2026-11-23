@@ -958,6 +958,126 @@ let test_rules () =
   status_is "king vs king status is a draw"
     (Status.Draw Status.Insufficient_material)
     (Game.of_position (position_with kings))
+
+(* ------------------------------------------------------------------ *)
+(* Bot (Jah)                                                           *)
+(* ------------------------------------------------------------------ *)
+
+let test_bot () =
+  let position_with ?(turn = Color.White) pieces =
+    let board =
+      List.fold_left
+        (fun board (square, color, kind) ->
+          Board.set board (sq square) (Some (Piece.make color kind)))
+        Board.empty pieces
+    in
+    Position.make ~board ~turn ~castling:Castling.none ~en_passant:None
+      ~halfmove_clock:0 ~fullmove_number:1
+  in
+  let rng () = Random.State.make [| 3110 |] in
+  let choice strategy g =
+    match Bot.choose ~strategy ~rng:(rng ()) g with
+    | Some m -> Move.to_string m
+    | None -> "none"
+  in
+  let is_legal_choice strategy g =
+    match Bot.choose ~strategy ~rng:(rng ()) g with
+    | Some m -> List.exists (Move.equal m) (Engine.legal_moves g)
+    | None -> false
+  in
+
+  (* evaluate *)
+  check_int "the start position is level" ~expected:0
+    ~actual:(Bot.evaluate Position.initial);
+  let kings = [ ("e1", Color.White, Piece.King); ("e8", Color.Black, Piece.King) ] in
+  check_int "an extra white queen is +900" ~expected:900
+    ~actual:
+      (Bot.evaluate (position_with (("d1", Color.White, Piece.Queen) :: kings)));
+  check_int "an extra black rook is -500" ~expected:(-500)
+    ~actual:
+      (Bot.evaluate (position_with (("a8", Color.Black, Piece.Rook) :: kings)));
+
+  (* every strategy plays a legal move *)
+  List.iter
+    (fun (name, strategy) ->
+      check (name ^ " plays a legal move at the start")
+        (is_legal_choice strategy (Game.create ())))
+    [ ("random", Bot.Random); ("greedy", Bot.Greedy_capture);
+      ("avoid threats", Bot.Avoid_threats) ];
+
+  (* no moves means no choice *)
+  let fools =
+    List.fold_left
+      (fun g t -> Game.apply_unchecked g (mv t))
+      (Game.create ())
+      [ "f2f3"; "e7e5"; "g2g4"; "d8h4" ]
+  in
+  check_string "the bot has nothing to play when mated" ~expected:"none"
+    ~actual:(choice Bot.Avoid_threats fools);
+
+  (* greedy takes the biggest piece on offer *)
+  let offer =
+    Game.of_position
+      (position_with
+         [ ("e1", Color.White, Piece.King); ("d1", Color.White, Piece.Rook);
+           ("d7", Color.Black, Piece.Queen); ("a1", Color.White, Piece.Rook);
+           ("a6", Color.Black, Piece.Pawn); ("h8", Color.Black, Piece.King) ])
+  in
+  check_string "greedy takes the queen over the pawn" ~expected:"d1d7"
+    ~actual:(choice Bot.Greedy_capture offer);
+
+  (* the queen on d4 can grab d6, but the e7 pawn guards it *)
+  let poisoned =
+    Game.of_position
+      (position_with
+         [ ("e1", Color.White, Piece.King); ("d4", Color.White, Piece.Queen);
+           ("d6", Color.Black, Piece.Pawn); ("e7", Color.Black, Piece.Pawn);
+           ("a8", Color.Black, Piece.King) ])
+  in
+  check_string "greedy grabs the guarded pawn" ~expected:"d4d6"
+    ~actual:(choice Bot.Greedy_capture poisoned);
+  check "avoid threats leaves the guarded pawn alone"
+    (choice Bot.Avoid_threats poisoned <> "d4d6");
+
+  (* the b6 bishop already attacks the d4 rook; a king move would leave it *)
+  let threatened =
+    Game.of_position
+      (position_with
+         [ ("e1", Color.White, Piece.King); ("d4", Color.White, Piece.Rook);
+           ("b6", Color.Black, Piece.Bishop); ("h8", Color.Black, Piece.King) ])
+  in
+  check "avoid threats moves an attacked rook out of the way"
+    (String.sub (choice Bot.Avoid_threats threatened) 0 2 = "d4");
+
+  (* the e7 knight seems to guard d5, but the e2 rook pins it to the king *)
+  let pinned_guard =
+    Game.of_position
+      (position_with
+         [ ("a1", Color.White, Piece.King); ("d1", Color.White, Piece.Queen);
+           ("e2", Color.White, Piece.Rook); ("d5", Color.Black, Piece.Pawn);
+           ("e7", Color.Black, Piece.Knight); ("e8", Color.Black, Piece.King) ])
+  in
+  check_string "a pinned knight does not scare off the queen" ~expected:"d1d5"
+    ~actual:(choice Bot.Avoid_threats pinned_guard);
+
+  (* a seeded bot is reproducible *)
+  check "the same seed gives the same move"
+    (choice Bot.Random (Game.create ()) = choice Bot.Random (Game.create ()));
+
+  (* bot against bot: every move it picks must be accepted by the engine *)
+  let rec self_play g plies =
+    if plies = 0 || Status.is_over (Engine.status g) then true
+    else
+      match Bot.choose ~strategy:Bot.Avoid_threats ~rng:(rng ()) g with
+      | None -> false
+      | Some m -> (
+          match Engine.play g m with
+          | Ok g' -> self_play g' (plies - 1)
+          | Error _ -> false)
+  in
+  check "bot vs bot plays 100 plies without an illegal move"
+    (self_play (Game.create ()) 100)
+
 (* ------------------------------------------------------------------ *)
 (* Edge cases the special rules are prone to getting wrong              *)
 (* ------------------------------------------------------------------ *)
