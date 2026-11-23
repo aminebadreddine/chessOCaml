@@ -22,7 +22,13 @@ val new_game : unit -> Game.t
 val play : Game.t -> Move.t -> (Game.t, error) result
 (** [play g move] is the game after [move], or an error if the game is over or
     the move is not legal. This is the only move-playing function user-facing
-    code should call. *)
+    code should call.
+
+    It generates the legal moves in order to check [move] against them, so it
+    is the right function for a move typed by a player and the wrong one for a
+    bot trying every move in turn — that would regenerate the list once per
+    candidate. Code that already holds a move from {!legal_moves} knows it is
+    legal and should use {!Game.apply_unchecked} directly. *)
 
 val legal_moves : Game.t -> Move.t list
 (** [legal_moves g] is every legal move in the current position. *)

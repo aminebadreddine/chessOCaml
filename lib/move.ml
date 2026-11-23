@@ -9,6 +9,14 @@ type t = {
 let make ?promotion from to_ = { from; to_; promotion }
 let equal m1 m2 = m1 = m2
 
+let compare m1 m2 =
+  match Square.compare m1.from m2.from with
+  | 0 -> (
+      match Square.compare m1.to_ m2.to_ with
+      | 0 -> Stdlib.compare m1.promotion m2.promotion
+      | c -> c)
+  | c -> c
+
 let to_string m =
   Square.to_string m.from ^ Square.to_string m.to_
   ^

@@ -33,23 +33,23 @@ dependencies point downward only, everything is immutable, every module has an
 
 The foundation is complete and tested: squares, pieces, moves, castling
 rights, the board, positions, game history with undo and repetition counting,
-and FEN printing. `dune test` reports 103 checks with the foundation green.
+and FEN both ways. `dune test` reports 127 checks, all green.
 
-Ordinary chess moves already work — pushes, piece moves, and captures update
-the board, the turn, both clocks, and the move number correctly. What does not
-work yet is the special rules and everything above `Position` in the module
-graph.
+Every chess rule that is a property of a *single move* is implemented —
+ordinary moves and captures, en passant, promotion, castling including the
+rook's jump, castling rights lost by moving or by having a rook captured, the
+en passant target, both clocks, and the move number. `Position.apply_unchecked`
+plays any of them correctly.
+
+What is missing is everything that requires knowing how pieces move or what is
+legal: `Movegen` and everything above it in the module graph. There is no way
+to ask for the legal moves yet, so there is no playable game loop.
 
 ## What is left, and whose it is
 
-The test suite has two groups. **Foundation** must stay green; a red check
-there means someone has broken something the rest of the team depends on.
-**Staged** is the to-do list — those failures are expected and do not fail the
-build. Move a test from staged to foundation as its feature lands.
-
 | Owner | Module | State |
 |---|---|---|
-| Yedidia | `Board`, `Position`, `Game`, `Fen` | done except five helpers in `position.ml` and `Fen.to_position` |
+| Yedidia | `Board`, `Position`, `Game`, `Fen` | **done** |
 | Xavier | `Movegen` | interface drafted, not implemented |
 | Shehroze | `Rules` | interface drafted, not implemented |
 | Amine | `Notation`, `Render`, `Persist` | interfaces drafted; `Render.ascii` works as a debug renderer |
@@ -59,26 +59,46 @@ The drafted interfaces exist so that everything compiles and nobody is blocked.
 **They are drafts.** The owner should change their own `.mli` as they learn
 what the module actually needs, and announce the change in the group chat.
 
-## Remaining foundation work
+`Fen.to_position` is the thing to reach for when writing tests: it builds any
+position from one line of text, so a test case is a FEN string rather than a
+dozen calls to `Board.set`.
 
-Five one-rule helpers at the bottom of `lib/position.ml`, each currently
-returning its input unchanged, each with a failing test waiting:
+## Verifying the engine
 
-1. `next_en_passant_target` — set the target after a double pawn push
-2. `capture_en_passant_victim` — remove the pawn that is not on the destination
-3. `promote` — swap the pawn for the chosen piece
-4. `move_castling_rook` — move the rook when the king jumps two files
-5. `next_castling_rights` — withdraw rights when the king moves, the rook
-   moves, **or the rook is captured**
+Once `Movegen` and `Rules` exist, the cheapest way to know they are right is
+perft: count the leaf nodes of the move tree to a given depth and compare
+against published figures. From the starting position the counts are 20, 400,
+8902, and 197281 for depths 1 to 4.
 
-Plus `Fen.to_position`, the parser. Its whole test is the round trip against
-`Fen.of_position`, which already works.
+That is a far stronger check than hand-written cases, because a single wrong
+rule anywhere shows up as a wrong total. Use these five positions, which exist
+precisely to catch the rules that are easy to get wrong:
+
+| Position | FEN | Depths 1-3 |
+|---|---|---|
+| start | `rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1` | 20, 400, 8902 |
+| Kiwipete | `r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1` | 48, 2039, 97862 |
+| en passant | `8/2p5/3p4/KP5r/1R3p1k/8/4P1P1/8 w - - 0 1` | 14, 191, 2812 |
+| promotions | `r3k2r/Pppp1ppp/1b3nbN/nP6/BBP1P3/q4N2/Pp1P2PP/R2Q1RK1 w kq - 0 1` | 6, 264, 9467 |
+| position 5 | `rnbq1k1r/pp1Pbppp/2p5/8/2B5/8/PPP1NnPP/RNBQK2R w KQ - 1 8` | 44, 1486, 62379 |
+
+`Fen.to_position` turns each row into a position in one line. The foundation
+has already been checked against all five with a scratch move generator, so a
+mismatch points at `Movegen` or `Rules`, not at the board or the position.
 
 ## Testing
 
 No external test library, so a fresh clone runs `dune test` with nothing
 installed. If we move to OUnit2 later, only the harness at the top of
 `test/test_chessOCaml.ml` changes.
+
+The suite is one file today. When it outgrows that, split it by area and
+switch `test/dune` from `(test (name ...))` to `(tests (names test_board
+test_movegen ...))`, which builds each as its own executable. Splitting early
+is worth it once two people are adding tests, since one file is one merge
+conflict.
+
+CI runs `dune build` and `dune test` on every pull request. Keep it green.
 
 Once `Movegen` exists, the cheapest way to know it is right is perft: count
 the leaf nodes at depth 1 through 4 from the starting position and compare

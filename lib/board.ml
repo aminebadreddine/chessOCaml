@@ -47,16 +47,29 @@ let to_list b =
        (fun sq p acc -> match p with Some p -> (sq, p) :: acc | None -> acc)
        b [])
 
+(* One pass, rather than filtering [to_list]: legality testing calls this for
+   every candidate move, so the intermediate list is worth not building. *)
 let pieces_of b color =
-  List.filter (fun (_, p) -> Color.equal p.Piece.color color) (to_list b)
+  List.rev
+    (fold
+       (fun sq piece acc ->
+         match piece with
+         | Some p when Color.equal p.Piece.color color -> (sq, p) :: acc
+         | _ -> acc)
+       b [])
 
+(* Scans directly and stops at the king, for the same reason. *)
 let find_king b color =
-  let is_king (_, p) =
-    Color.equal p.Piece.color color && p.Piece.kind = Piece.King
+  let rec go i =
+    if i > 63 then None
+    else
+      match b.(i) with
+      | Some p when p.Piece.kind = Piece.King && Color.equal p.Piece.color color
+        ->
+          Square.of_index i
+      | _ -> go (i + 1)
   in
-  match List.find_opt is_king (to_list b) with
-  | Some (sq, _) -> Some sq
-  | None -> None
+  go 0
 
 let equal b1 b2 =
   let rec go i =
