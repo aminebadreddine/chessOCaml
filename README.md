@@ -98,8 +98,6 @@ test_movegen ...))`, which builds each as its own executable. Splitting early
 is worth it once two people are adding tests, since one file is one merge
 conflict.
 
-CI runs `dune build` and `dune test` on every pull request. Keep it green.
-
 Once `Movegen` exists, the cheapest way to know it is right is perft: count
 the leaf nodes at depth 1 through 4 from the starting position and compare
 against the published figures (20, 400, 8902, 197281). A move generator that
