@@ -1043,7 +1043,6 @@ let test_fen_errors () =
 (* ------------------------------------------------------------------ *)
 
 let run_guarded name f =
-  (* A staged feature may raise rather than return a wrong answer. *)
   try f () with
   | Failure m -> fail name ("raised Failure: " ^ m)
   | Invalid_argument m -> fail name ("raised Invalid_argument: " ^ m)
@@ -1059,6 +1058,9 @@ let foundation_tests =
     ("ordinary moves", test_ordinary_moves);
     ("games", test_game);
     ("FEN printing", test_fen_printing);
+    ("move generation", test_move_generation);
+    ("attacks", test_attacks);
+    ("rules", test_rules);
     ("en passant", test_en_passant);
     ("promotion", test_promotion);
     ("castling", test_castling);
@@ -1075,38 +1077,15 @@ let () =
   print_endline "=== foundation ===";
   group := `Foundation;
   List.iter (fun (name, f) -> run_guarded name f) foundation_tests;
+
   if staged_tests <> [] then (
     print_endline "\n=== staged features (not implemented yet) ===";
     group := `Staged;
     List.iter (fun (name, f) -> run_guarded name f) staged_tests);
-  List.iter
-    (fun (name, f) -> run_guarded name f)
-    [
-      ("squares", test_squares);
-      ("pieces", test_pieces);
-      ("moves", test_moves);
-      ("castling rights", test_castling_rights);
-      ("board", test_board);
-      ("positions", test_position);
-      ("ordinary moves", test_ordinary_moves);
-      ("games", test_game);
-      ("FEN printing", test_fen_printing);
-      ("move generation", test_move_generation);
-      ("attacks", test_attacks);
-      ("rules", test_rules);
-    ];
-  print_endline "\n=== staged features (not implemented yet) ===";
-  group := `Staged;
-  List.iter
-    (fun (name, f) -> run_guarded name f)
-    [
-      ("en passant", test_en_passant);
-      ("promotion", test_promotion);
-      ("castling", test_castling);
-      ("FEN parsing", test_fen_parsing);
-    ];
+
   Printf.printf "\n%d checks, %d foundation failures, %d staged failures\n"
     !checks !foundation_failures !staged_failures;
+
   if !foundation_failures > 0 then (
     print_endline "FOUNDATION BROKEN: something everyone depends on is wrong.";
     exit 1)
