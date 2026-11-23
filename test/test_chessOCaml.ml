@@ -824,7 +824,128 @@ let test_fen_parsing () =
     | Ok _ -> false);
   check "an empty string is rejected"
     (match Fen.to_position "" with Error _ -> true | Ok _ -> false)
+(* ------------------------------------------------------------------ *)
+(* Rules (Shehroze)                                                    *)
+(* ------------------------------------------------------------------ *)
 
+(* expected answers here were worked out by hand on a board, not by
+   running the code *)
+let test_rules () =
+  let position_with ?(turn = Color.White) ?(halfmove = 0) pieces =
+    let board =
+      List.fold_left
+        (fun board (square, color, kind) ->
+          Board.set board (sq square) (Some (Piece.make color kind)))
+        Board.empty pieces
+    in
+    Position.make ~board ~turn ~castling:Castling.none ~en_passant:None
+      ~halfmove_clock:halfmove ~fullmove_number:1
+  in
+  let play_game texts =
+    List.fold_left
+      (fun g t -> Game.apply_unchecked g (mv t))
+      (Game.create ()) texts
+  in
+  let status_is name expected g =
+    check_string name ~expected:(Status.to_string expected)
+      ~actual:(Status.to_string (Rules.status g))
+  in
+
+  (* start position *)
+  check_int "20 legal moves at the start" ~expected:20
+    ~actual:(List.length (Rules.legal_moves Position.initial));
+  check "nobody is in check at the start"
+    ((not (Rules.is_in_check Position.initial Color.White))
+    && not (Rules.is_in_check Position.initial Color.Black));
+  status_is "a new game is ongoing" Status.Ongoing (Game.create ());
+  check_int "the g1 knight has 2 legal moves" ~expected:2
+    ~actual:(List.length (Rules.legal_moves_from Position.initial (sq "g1")));
+
+  (* is_legal *)
+  check "e2e4 is legal" (Rules.is_legal Position.initial (mv "e2e4"));
+  check "a rook jumping its own pawn is illegal"
+    (not (Rules.is_legal Position.initial (mv "a1a8")));
+  check "moving from an empty square is illegal"
+    (not (Rules.is_legal Position.initial (mv "e4e5")));
+  check "moving the other side's piece is illegal"
+    (not (Rules.is_legal Position.initial (mv "e7e5")));
+
+  (* check *)
+  let rook_check =
+    position_with
+      [ ("e1", Color.White, Piece.King); ("e8", Color.Black, Piece.Rook);
+        ("a8", Color.Black, Piece.King) ]
+  in
+  check "a rook on the open file gives check"
+    (Rules.is_in_check rook_check Color.White);
+  status_is "status reports check" (Status.Check Color.White)
+    (Game.of_position rook_check);
+  check "the king cant stay on the checked file"
+    (not (Rules.is_legal rook_check (mv "e1e2")));
+  check "the king can step off the file" (Rules.is_legal rook_check (mv "e1d1"));
+
+  (* pins *)
+  let pinned =
+    position_with
+      [ ("e1", Color.White, Piece.King); ("e2", Color.White, Piece.Bishop);
+        ("e8", Color.Black, Piece.Rook); ("a8", Color.Black, Piece.King) ]
+  in
+  check_int "a pinned bishop has no legal moves" ~expected:0
+    ~actual:(List.length (Rules.legal_moves_from pinned (sq "e2")));
+  check "but the bishop still has pseudo-legal moves"
+    (Movegen.pseudo_legal_from pinned (sq "e2") <> []);
+
+  (* checkmate: fool's mate *)
+  let fools = play_game [ "f2f3"; "e7e5"; "g2g4"; "d8h4" ] in
+  status_is "fool's mate is checkmate for white" (Status.Checkmate Color.White)
+    fools;
+  check "white has no legal moves after fool's mate"
+    (Rules.legal_moves (Game.position fools) = []);
+  check "engine refuses a move after mate"
+    (match Engine.play fools (mv "e2e4") with Error _ -> true | Ok _ -> false);
+
+  (* stalemate: black king a8, white queen c7, black to move, not in check *)
+  let stale =
+    position_with ~turn:Color.Black
+      [ ("a8", Color.Black, Piece.King); ("c7", Color.White, Piece.Queen);
+        ("e1", Color.White, Piece.King) ]
+  in
+  check "stalemated king is not in check"
+    (not (Rules.is_in_check stale Color.Black));
+  status_is "no moves and no check is stalemate" (Status.Draw Status.Stalemate)
+    (Game.of_position stale);
+
+  (* fifty move rule *)
+  status_is "halfmove clock at 100 is a draw" (Status.Draw Status.Fifty_move)
+    (Game.of_position
+       (position_with ~halfmove:100
+          [ ("e1", Color.White, Piece.King); ("a1", Color.White, Piece.Rook);
+            ("e8", Color.Black, Piece.King) ]));
+
+  (* threefold: both knights out and back twice *)
+  let shuffle = [ "g1f3"; "g8f6"; "f3g1"; "f6g8" ] in
+  status_is "start position three times is a draw"
+    (Status.Draw Status.Threefold_repetition)
+    (play_game (shuffle @ shuffle));
+  status_is "twice is not enough" Status.Ongoing (play_game shuffle);
+
+  (* insufficient material *)
+  let kings = [ ("e1", Color.White, Piece.King); ("e8", Color.Black, Piece.King) ] in
+  check "king vs king" (Rules.is_insufficient_material (position_with kings));
+  check "king and knight vs king"
+    (Rules.is_insufficient_material
+       (position_with (("b1", Color.White, Piece.Knight) :: kings)));
+  check "king and rook is enough to mate"
+    (not
+       (Rules.is_insufficient_material
+          (position_with (("a1", Color.White, Piece.Rook) :: kings))));
+  check "a pawn is enough to mate"
+    (not
+       (Rules.is_insufficient_material
+          (position_with (("a2", Color.White, Piece.Pawn) :: kings))));
+  status_is "king vs king status is a draw"
+    (Status.Draw Status.Insufficient_material)
+    (Game.of_position (position_with kings))
 (* ------------------------------------------------------------------ *)
 (* Runner                                                              *)
 (* ------------------------------------------------------------------ *)
@@ -852,6 +973,7 @@ let () =
       ("FEN printing", test_fen_printing);
       ("move generation", test_move_generation);
       ("attacks", test_attacks);
+      ("rules", test_rules);
     ];
   print_endline "\n=== staged features (not implemented yet) ===";
   group := `Staged;
