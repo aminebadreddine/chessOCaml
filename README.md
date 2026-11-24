@@ -33,7 +33,7 @@ dependencies point downward only, everything is immutable, every module has an
 
 The foundation is complete and tested: squares, pieces, moves, castling
 rights, the board, positions, game history with undo and repetition counting,
-and FEN both ways. `dune test` reports 127 checks, all green.
+and FEN both ways. `dune test` reports 232 checks, all green.
 
 Every chess rule that is a property of a *single move* is implemented —
 ordinary moves and captures, en passant, promotion, castling including the
@@ -41,9 +41,11 @@ rook's jump, castling rights lost by moving or by having a rook captured, the
 en passant target, both clocks, and the move number. `Position.apply_unchecked`
 plays any of them correctly.
 
-What is missing is everything that requires knowing how pieces move or what is
-legal: `Movegen` and everything above it in the module graph. There is no way
-to ask for the legal moves yet, so there is no playable game loop.
+Move generation, legality and the bot are in place too, so a full legal game
+can be played through `Engine`: illegal moves are rejected, and check,
+checkmate, stalemate and the draw rules are detected. What is missing is
+castling and en passant generation in `Movegen`, and the terminal game loop
+that lets a player type moves.
 
 ## What is left, and whose it is
 
@@ -51,9 +53,9 @@ to ask for the legal moves yet, so there is no playable game loop.
 |---|---|---|
 | Yedidia | `Board`, `Position`, `Game`, `Fen` | **done** |
 | Xavier | `Movegen` | done except implementation for castling and en passant |
-| Shehroze | `Rules` | interface drafted, not implemented |
-| Amine | `Notation`, `Render`, `Persist` | interfaces drafted; `Render.ascii` works as a debug renderer |
-| Jah | `Bot`, tests | interface drafted, not implemented |
+| Shehroze | `Rules` | **done** |
+| Amine | `Notation`, `Render`, `Persist`, game loop | `Render.ascii` works; Fancy rendering in PR #2; `Notation`, `Persist` and the game loop not started |
+| Jah | `Bot`, tests | **done**: three strategies, with tests |
 
 The drafted interfaces exist so that everything compiles and nobody is blocked.
 **They are drafts.** The owner should change their own `.mli` as they learn

@@ -1187,6 +1187,7 @@ let foundation_tests =
     ("FEN parsing", test_fen_parsing);
     ("FEN errors", test_fen_errors);
     ("edge cases", test_edge_cases);
+    ("bot", test_bot);
   ]
 
 (* Tests written before the code they describe. Their failures are a to-do
