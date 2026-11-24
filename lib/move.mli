@@ -25,6 +25,12 @@ val make : ?promotion:Piece.kind -> Square.t -> Square.t -> t
 val equal : t -> t -> bool
 (** [equal m1 m2] is whether the two moves agree in all three fields. *)
 
+val compare : t -> t -> int
+(** [compare m1 m2] orders moves by origin, then destination, then promotion.
+    The order is arbitrary but total and stable, which is what a bot needs to
+    break ties the same way every run, and what {!Notation} needs to sort
+    candidates when disambiguating. *)
+
 val to_string : t -> string
 (** [to_string m] is long algebraic notation: ["e2e4"], or ["e7e8q"] for a
     promotion. This is the format the test suite and save files use. It is not

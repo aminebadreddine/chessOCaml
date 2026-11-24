@@ -6,10 +6,11 @@
 
     Two groups. The {b foundation} group covers what is implemented and must
     stay green: anyone whose change turns one of these red has broken
-    something someone else depends on. The {b staged} group covers the special
-    rules that are deliberately not implemented yet. Those failures are the
-    to-do list, not a broken build, so they do not fail [dune test]. Move a
-    test out of the staged group as its feature lands. *)
+    something someone else depends on. The {b staged} group is for tests
+    written ahead of the feature they describe; those failures are a to-do
+    list rather than a broken build, so they do not fail [dune test]. It is
+    empty at the moment. Add to it when writing tests before the code, and
+    move each one into the foundation list as its feature lands. *)
 
 open ChessOCaml
 
@@ -127,7 +128,18 @@ let test_moves () =
   check "promoting to a king is not a move" (Move.of_string "e7e8k" = None);
   check "promoting to a pawn is not a move" (Move.of_string "e7e8p" = None);
   check "a three-character move is not a move" (Move.of_string "e2e" = None);
-  check "moves compare by value" (Move.equal (mv "e2e4") (mv "e2e4"))
+  check "moves compare by value" (Move.equal (mv "e2e4") (mv "e2e4"));
+  check "compare agrees with equal" (Move.compare (mv "e2e4") (mv "e2e4") = 0);
+  check "compare orders by origin first"
+    (Move.compare (mv "a2a3") (mv "b2b3") < 0);
+  check "compare orders by destination next"
+    (Move.compare (mv "e2e3") (mv "e2e4") < 0);
+  check "compare separates promotion choices"
+    (Move.compare (mv "e7e8q") (mv "e7e8n") <> 0);
+  (* A total order means sorting is stable and dedup works. *)
+  let sorted = List.sort_uniq Move.compare [ mv "e2e4"; mv "a2a3"; mv "e2e4" ] in
+  check_int "sort_uniq removes the duplicate" ~expected:2
+    ~actual:(List.length sorted)
 
 let test_castling_rights () =
   section "castling rights";
@@ -299,7 +311,7 @@ let test_fen_printing () =
     ~expected:"8/8/8/8/8/8/8/8" ~actual:(Fen.of_board Board.empty);
   let after = play_all Position.initial [ "e2e4"; "c7c5" ] in
   check_string "a played position prints"
-    ~expected:"rnbqkbnr/pp1ppppp/8/2p5/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 2"
+    ~expected:"rnbqkbnr/pp1ppppp/8/2p5/4P3/8/PPPP1PPP/RNBQKBNR w KQkq c6 0 2"
     ~actual:(fen after)
 
 
@@ -734,7 +746,7 @@ let test_attacks () =
 (* ------------------------------------------------------------------ *)
 
 let test_en_passant () =
-  section "staged: en passant";
+  section "en passant";
   let p = play_all Position.initial [ "e2e4"; "a7a6"; "e4e5"; "d7d5" ] in
   check_string "a double push sets the target square" ~expected:"d6"
     ~actual:
@@ -751,7 +763,7 @@ let test_en_passant () =
     (Position.en_passant quiet = None)
 
 let test_promotion () =
-  section "staged: promotion";
+  section "promotion";
   let board =
     Board.set
       (Board.set
@@ -771,7 +783,7 @@ let test_promotion () =
     ~actual:(at promoted "a7")
 
 let test_castling () =
-  section "staged: castling";
+  section "castling";
   let board =
     List.fold_left
       (fun b (name, piece) -> Board.set b (sq name) (Some piece))
@@ -808,7 +820,7 @@ let test_castling () =
     ~actual:(Castling.to_string (Position.castling rook_taken))
 
 let test_fen_parsing () =
-  section "staged: FEN parsing";
+  section "FEN parsing";
   (match Fen.to_position initial_fen with
   | Ok p ->
       check "the starting FEN parses back" (Position.equal p Position.initial)
@@ -1067,53 +1079,138 @@ let test_bot () =
     (self_play (Game.create ()) 100)
 
 (* ------------------------------------------------------------------ *)
+(* Edge cases the special rules are prone to getting wrong              *)
+(* ------------------------------------------------------------------ *)
+
+let position_of_fen text =
+  match Fen.to_position text with
+  | Ok p -> p
+  | Error m -> failwith ("test bug: " ^ text ^ " did not parse: " ^ m)
+
+let test_edge_cases () =
+  section "edge cases";
+  (* A pawn may capture and promote in the same move. *)
+  let p =
+    position_of_fen "r3k3/1P6/8/8/8/8/8/4K3 w q - 0 1"
+  in
+  let after = play p "b7a8q" in
+  check_string "a capturing promotion leaves a queen" ~expected:"Q"
+    ~actual:(at after "a8");
+  check_string "capturing the rook on a8 kills black's queenside right"
+    ~expected:"-"
+    ~actual:(Castling.to_string (Position.castling after));
+  (* A bishop capturing a rook destroys the right just as a rook would. *)
+  let p = position_of_fen "r3k2r/8/8/8/8/8/6B1/4K3 w kq - 0 1" in
+  let after = play p "g2a8" in
+  check_string "a bishop taking the a8 rook kills the queenside right"
+    ~expected:"k" ~actual:(Castling.to_string (Position.castling after));
+  (* Only a double push sets a target; a single push must clear it. *)
+  let p = position_of_fen "4k3/8/8/8/8/8/4P3/4K3 w - - 0 1" in
+  check "a single push sets no target"
+    (Position.en_passant (play p "e2e3") = None);
+  check_string "a double push sets the skipped square" ~expected:"e3"
+    ~actual:
+      (match Position.en_passant (play p "e2e4") with
+      | Some sq -> Square.to_string sq
+      | None -> "-");
+  (* Black's en passant works the same way, one rank lower. *)
+  let p = position_of_fen "4k3/8/8/8/3pP3/8/8/4K3 b - e3 0 1" in
+  let after = play p "d4e3" in
+  check_string "black captures en passant onto e3" ~expected:"p"
+    ~actual:(at after "e3");
+  check_string "the white pawn on e4 is removed" ~expected:"-"
+    ~actual:(at after "e4");
+  (* Queenside castling moves the rook three files, not two. *)
+  let p = position_of_fen "4k3/8/8/8/8/8/8/R3K3 w Q - 0 1" in
+  let after = play p "e1c1" in
+  check_string "the king lands on c1" ~expected:"K" ~actual:(at after "c1");
+  check_string "the rook lands on d1" ~expected:"R" ~actual:(at after "d1");
+  check_string "a1 is vacated" ~expected:"-" ~actual:(at after "a1");
+  (* The clock counts plies, and a capture resets it however deep it is. *)
+  let p = position_of_fen "4k3/8/8/8/8/8/8/4K2R w K - 37 20" in
+  check_int "a quiet move advances the clock" ~expected:38
+    ~actual:(Position.halfmove_clock (play p "h1h2"))
+
+let test_fen_errors () =
+  section "FEN errors";
+  let rejects name text =
+    check name (match Fen.to_position text with Error _ -> true | Ok _ -> false)
+  in
+  rejects "too few fields" "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w";
+  rejects "a rank that is too short" "8/8/8/8/8/8/8/7 w - - 0 1";
+  rejects "a rank with nine pieces" "8/8/8/8/8/8/8/ppppppppp w - - 0 1";
+  rejects "a rank whose digits overrun" "8/8/8/8/8/8/8/44p w - - 0 1";
+  (* Non-maximal runs describe the right number of squares, so they parse.
+     Standard FEN would write "8", but there is nothing ambiguous about "44"
+     and rejecting it would only make hand-typed positions harder to use. *)
+  check "a non-maximal run of empties is accepted"
+    (match Fen.to_position "8/8/8/8/8/8/8/44 w - - 0 1" with
+    | Ok _ -> true
+    | Error _ -> false);
+  rejects "an unknown piece letter" "8/8/8/8/8/8/8/7X w - - 0 1";
+  rejects "a bad side to move" "8/8/8/8/8/8/8/8 x - - 0 1";
+  rejects "a bad castling field" "8/8/8/8/8/8/8/8 w KZ - 0 1";
+  rejects "a bad en passant square" "8/8/8/8/8/8/8/8 w - e9 0 1";
+  rejects "a negative clock" "8/8/8/8/8/8/8/8 w - - -1 1";
+  (* Extra spaces between fields are tolerated, since people hand-type these. *)
+  check "extra spaces are tolerated"
+    (match Fen.to_position "8/8/8/8/8/8/8/8  w - -  0 1" with
+    | Ok _ -> true
+    | Error _ -> false)
+
+(* ------------------------------------------------------------------ *)
 (* Runner                                                              *)
 (* ------------------------------------------------------------------ *)
 
 let run_guarded name f =
-  (* A staged feature may raise rather than return a wrong answer. *)
   try f () with
   | Failure m -> fail name ("raised Failure: " ^ m)
   | Invalid_argument m -> fail name ("raised Invalid_argument: " ^ m)
 
+let foundation_tests =
+  [
+    ("squares", test_squares);
+    ("pieces", test_pieces);
+    ("moves", test_moves);
+    ("castling rights", test_castling_rights);
+    ("board", test_board);
+    ("positions", test_position);
+    ("ordinary moves", test_ordinary_moves);
+    ("games", test_game);
+    ("FEN printing", test_fen_printing);
+    ("move generation", test_move_generation);
+    ("attacks", test_attacks);
+    ("rules", test_rules);
+    ("en passant", test_en_passant);
+    ("promotion", test_promotion);
+    ("castling", test_castling);
+    ("FEN parsing", test_fen_parsing);
+    ("FEN errors", test_fen_errors);
+    ("edge cases", test_edge_cases);
+  ]
+
+(* Tests written before the code they describe. Their failures are a to-do
+   list, not a broken build. *)
+let staged_tests : (string * (unit -> unit)) list = []
+
 let () =
   print_endline "=== foundation ===";
   group := `Foundation;
-  List.iter
-    (fun (name, f) -> run_guarded name f)
-    [
-      ("squares", test_squares);
-      ("pieces", test_pieces);
-      ("moves", test_moves);
-      ("castling rights", test_castling_rights);
-      ("board", test_board);
-      ("positions", test_position);
-      ("ordinary moves", test_ordinary_moves);
-      ("games", test_game);
-      ("FEN printing", test_fen_printing);
-      ("move generation", test_move_generation);
-      ("attacks", test_attacks);
-      ("rules", test_rules);
-      ("bot", test_bot);
-    ];
-  print_endline "\n=== staged features (not implemented yet) ===";
-  group := `Staged;
-  List.iter
-    (fun (name, f) -> run_guarded name f)
-    [
-      ("en passant", test_en_passant);
-      ("promotion", test_promotion);
-      ("castling", test_castling);
-      ("FEN parsing", test_fen_parsing);
-    ];
+  List.iter (fun (name, f) -> run_guarded name f) foundation_tests;
+
+  if staged_tests <> [] then (
+    print_endline "\n=== staged features (not implemented yet) ===";
+    group := `Staged;
+    List.iter (fun (name, f) -> run_guarded name f) staged_tests);
+
   Printf.printf "\n%d checks, %d foundation failures, %d staged failures\n"
     !checks !foundation_failures !staged_failures;
+
   if !foundation_failures > 0 then (
     print_endline "FOUNDATION BROKEN: something everyone depends on is wrong.";
     exit 1)
   else if !staged_failures > 0 then
     Printf.printf
-      "Foundation is green. %d staged checks are waiting on the special \
-       rules.\n"
+      "Foundation is green. %d staged checks are waiting on their features.\n"
       !staged_failures
   else print_endline "All green."

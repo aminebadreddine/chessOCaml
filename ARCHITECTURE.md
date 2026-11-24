@@ -99,12 +99,18 @@ Two consequences worth stating outright:
 
 ## Adding a feature
 
-The special rules are staged so that each one is a small function nobody else
-has to know about. En passant, promotion, and castling are already carved out
-as five helpers at the bottom of `position.ml`, each currently a no-op that
-returns its input unchanged. That is why the engine already plays ordinary
-chess: implementing a feature means filling in one helper, not editing
-`apply_unchecked`.
+The special rules are carved out so that each one is a small function nobody
+else has to know about. En passant, promotion, and castling are five helpers
+at the bottom of `position.ml`, each returning its input unchanged when the
+move is not the kind it cares about. `apply_unchecked` calls them in order and
+never had to change as they were filled in; it still reads as a list of steps
+rather than a nest of conditionals.
 
-Each has a failing test in the staged group of the test suite. Fill in the
-helper, watch the test go green, move it into the foundation group.
+Keep that shape. When a rule needs adding, write a helper with the same
+signature pattern — takes what it needs, returns its input untouched if the
+move is not its business — and add one line to `apply_unchecked`. Do not grow
+the conditionals inside it.
+
+Write the test first. The suite has a staged group, currently empty, for tests
+written ahead of their feature: those failures are a to-do list and do not fail
+`dune test`. Move each one into the foundation list as its feature lands.
